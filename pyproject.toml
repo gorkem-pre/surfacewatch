@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "gorkem-pre" }]
 keywords = ["security", "attack-surface", "recon", "nmap", "blue-team", "red-team", "mitre-attack"]
-dependencies = ["PyYAML>=6.0"]
+dependencies = ["PyYAML>=6.0", "dnspython>=2.4"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.5"]

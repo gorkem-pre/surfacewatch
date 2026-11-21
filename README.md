@@ -17,7 +17,7 @@ SurfaceWatch, kendi sistemlerinin saldırı yüzeyini iki açıdan inceleyen bir
 |---|---|
 | 1. Çekirdek: kapsam kontrolü, SQLite kayıt, CLI | ✅ |
 | 2. Ağ: Nmap entegrasyonu, servis/sürüm tespiti, MITRE + düzeltme bilgi tabanı | ✅ |
-| 3. Pasif OSINT: Certificate Transparency, DNS | ⏳ |
+| 3. Pasif OSINT: crt.sh subdomain keşfi, subdomain takeover adayı, SPF/DMARC/CAA, NS/MX | ✅ |
 | 4. Web: güvenlik header'ları, TLS, açık hassas dosyalar | ⏳ |
 | 5. Zafiyet: sürüm → CVE (NVD) | ⏳ |
 | 6. Diff motoru + HTML/JSON rapor | ⏳ |
@@ -102,6 +102,43 @@ surfacewatch show 1 -v     # belirli bir tarama
 surfacewatch scans         # tarama geçmişi
 ```
 
+**5. Pasif OSINT**
+
+Hedefe hiçbir paket gönderilmez. Certificate Transparency kayıtları (crt.sh) ve DNS üzerinden bilgi toplanır.
+
+```bash
+surfacewatch osint ornek.com          # e-posta güvenliği, DNS ve subdomain'ler
+surfacewatch osint ornek.com -v       # çözülmeyen eski kayıtlar + MITRE + düzeltme
+surfacewatch osint ornek.com --no-ct  # sadece DNS kontrolleri
+```
+
+```
+E-posta ve DNS
+LOW       dns/caa      CAA kaydı yok: her sertifika otoritesi sertifika verebilir
+LOW       email/dmarc  DMARC: p=none, sadece izleme yapıyor, engellemiyor
+LOW       email/spf    SPF: ~all (softfail)
+INFO      dns/ns       NS: ns1.registrar.example, ns2.registrar.example
+
+Subdomain'ler (7 bulundu, 4 çözülüyor)
+ÖNEM      İSİM                     IP                AKTİF TARAMA
+HIGH      docs.ornek.com           dangling          -
+          Subdomain takeover adayı: docs.ornek.com -> ornek-docs.github.io (hedef yok)
+LOW       dev.ornek.com            192.168.56.20     izin
+          Hassas görünen subdomain internete açık: dev.ornek.com
+INFO      cdn.ornek.com            104.16.1.1        RED
+```
+
+`AKTİF TARAMA` sütunu her subdomain için kapsam kararını gösterir: bulunan her şey taranabilir değildir.
+
+| Kontrol | Ne arar | Neden önemli |
+|---|---|---|
+| SPF | Kayıt yok, `+all`, `?all`, birden fazla kayıt | Domain adına sahte e-posta gönderilebilir (T1566, T1656) |
+| DMARC | Kayıt yok, `p=none` | Sahte e-postalar alıcıda reddedilmez |
+| CAA | Kayıt yok | Her CA domain için sertifika verebilir |
+| Dangling CNAME | CNAME hedefi artık yok | GitHub Pages/S3/Azure gibi servislerde subdomain takeover (T1584.001) |
+| Hassas isimler | `dev`, `staging`, `jenkins`, `admin`... | İç ortamların internete açık kalması |
+| NS / MX envanteri | Kayıtların listesi | Diff motoru NS değişimini yakalar (domain ele geçirme işareti) |
+
 **Diğer seçenekler**
 
 ```bash
@@ -139,7 +176,9 @@ surfacewatch/
 │   └── storage.py   SQLite: scans / findings, diff için son iki tarama
 ├── modules/
 │   ├── network.py   nmap komutu, XML parse, Finding üretimi
-│   └── knowledge.py servis → önem, MITRE, düzeltme bilgi tabanı
+│   ├── knowledge.py servis → önem, MITRE, düzeltme bilgi tabanı
+│   ├── osint.py     crt.sh, subdomain analizi, SPF/DMARC/CAA
+│   └── dnsclient.py DNS arayüzü (dnspython / testler için FakeDns)
 └── cli.py
 ```
 

@@ -6,6 +6,7 @@
     surfacewatch scans                    geçmiş taramalar
 
     surfacewatch scan <hedef>...          ağ taraması (red)
+    surfacewatch osint <domain>...        pasif OSINT: subdomain, SPF/DMARC, DNS
     surfacewatch show [scan_id]           tarama bulgularını göster
 
 watch (blue / diff) komutu Modül 6'da eklenecek.
@@ -19,7 +20,8 @@ from pathlib import Path
 
 from . import __version__
 from .core import SEVERITIES, Finding, Scope, ScopeError, Storage, TargetType, classify
-from .modules import network
+from .modules import network, osint
+from .modules.dnsclient import DnsClient, DnsError, DnspythonClient
 
 SCOPE_TEMPLATE = """\
 # SurfaceWatch kapsam dosyası
@@ -115,11 +117,7 @@ def _sev(sev: str, color: bool) -> str:
     return f"\033[{_SEV_COLOR.get(sev, '0')}m{text}\033[0m" if color else text
 
 
-def print_findings(findings: list[Finding], verbose: bool = False) -> None:
-    color = sys.stdout.isatty()
-    if not findings:
-        print("Açık port bulunamadı.")
-        return
+def _print_network(findings: list[Finding], verbose: bool, color: bool) -> None:
     order = {s: i for i, s in enumerate(SEVERITIES)}
     findings = sorted(findings, key=lambda f: (f.target, -order[f.severity], f.data.get("port", 0)))
     print(f"{'ÖNEM':<8}  {'HEDEF':<18} {'PORT':<10} {'SERVİS':<14} SÜRÜM")
@@ -127,11 +125,64 @@ def print_findings(findings: list[Finding], verbose: bool = False) -> None:
         d = f.data
         banner = " ".join(x for x in (d.get("product"), d.get("version")) if x)
         print(f"{_sev(f.severity, color)}  {f.target:<18} {f.key:<10} {d.get('service', ''):<14} {banner}")
-        if verbose:
-            if d.get("note"):
-                print(f"          risk   : {d['note']}")
-            print(f"          MITRE  : {', '.join(f.mitre)}")
-            print(f"          düzelt : {f.remediation}")
+        _print_details(f, verbose)
+
+
+def _print_osint(findings: list[Finding], verbose: bool, color: bool) -> None:
+    order = {s: i for i, s in enumerate(SEVERITIES)}
+    checks = [f for f in findings if not f.key.startswith("subdomain/")]
+    subs = [f for f in findings if f.key.startswith("subdomain/")]
+    if checks:
+        print("E-posta ve DNS")
+        for f in sorted(checks, key=lambda f: (f.target, -order[f.severity], f.key)):
+            print(f"{_sev(f.severity, color)}  {f.key:<12} {f.title}")
+            _print_details(f, verbose)
+    if subs:
+        live = [f for f in subs if f.data.get("ips")]
+        print(f"\nSubdomain'ler ({len(subs)} bulundu, {len(live)} çözülüyor)")
+        print(f"{'ÖNEM':<8}  {'İSİM':<38} {'IP':<34} AKTİF TARAMA")
+        for f in sorted(subs, key=lambda f: (-order[f.severity], not f.data.get("ips"), f.data["name"])):
+            d = f.data
+            if not verbose and f.severity == "info" and not d.get("ips"):
+                continue  # çözülmeyen eski kayıtlar sadece -v ile
+            ips = ", ".join(d.get("ips", [])) or d.get("status", "")
+            if len(ips) > 34:
+                ips = ips[:31] + "..."
+            active = {True: "izin", False: "RED", None: "-"}[d.get("active_scan")]
+            print(f"{_sev(f.severity, color)}  {d['name']:<38} {ips:<34} {active}")
+            if f.severity != "info" or verbose:
+                _print_details(f, verbose, show_title=f.severity != "info")
+        hidden = sum(1 for f in subs if f.severity == "info" and not f.data.get("ips"))
+        if hidden and not verbose:
+            print(f"          (+{hidden} çözülmeyen eski kayıt gizlendi; görmek için -v)")
+
+
+def _print_details(f: Finding, verbose: bool, show_title: bool = False) -> None:
+    if show_title:
+        print(f"          {f.title}")
+    if not verbose:
+        return
+    if f.data.get("note"):
+        print(f"          risk   : {f.data['note']}")
+    if f.mitre:
+        print(f"          MITRE  : {', '.join(f.mitre)}")
+    if f.remediation:
+        print(f"          düzelt : {f.remediation}")
+
+
+def print_findings(findings: list[Finding], verbose: bool = False) -> None:
+    color = sys.stdout.isatty()
+    if not findings:
+        print("Bulgu yok.")
+        return
+    net = [f for f in findings if f.module == network.MODULE]
+    osi = [f for f in findings if f.module == osint.MODULE]
+    if net:
+        _print_network(net, verbose, color)
+    if osi:
+        if net:
+            print()
+        _print_osint(osi, verbose, color)
     counts = {s: sum(1 for f in findings if f.severity == s) for s in reversed(SEVERITIES)}
     print("\n" + f"{len(findings)} bulgu  " + "  ".join(f"{k}: {v}" for k, v in counts.items() if v))
 
@@ -197,6 +248,59 @@ def cmd_scan(args: argparse.Namespace) -> int:
     return 2 if status == "failed" else 0
 
 
+def make_dns() -> DnsClient:
+    return DnspythonClient()
+
+
+def cmd_osint(args: argparse.Namespace) -> int:
+    scope = _load_scope(args)
+    domains: list[str] = []
+    for t in args.domains:
+        if classify(t) != TargetType.DOMAIN:
+            print(f"[-] ATLANDI {t}: osint domain ister", file=sys.stderr)
+            continue
+        d = scope.check(t, active=False)
+        if not d.allowed:
+            print(f"[-] ATLANDI {d.target}: {d.reason}", file=sys.stderr)
+            continue
+        domains.append(d.target)
+    if not domains:
+        print("[!] Kapsam içi domain yok.", file=sys.stderr)
+        return 2
+
+    try:
+        dns = make_dns()
+    except DnsError as exc:
+        print(f"[!] {exc}", file=sys.stderr)
+        return 2
+
+    def scope_check(name: str, ips: list[str]):
+        # Zaten çözülmüş IP'leri kullan; aynı ismi tekrar DNS'e sorma
+        return scope.check(name, active=True, resolver=lambda _h: ips)
+
+    with Storage(args.db) as db:
+        scan_id = db.start_scan(scope.name, [osint.MODULE], domains)
+        all_findings: list[Finding] = []
+        for domain in domains:
+            print(f"[*] Pasif OSINT: {domain}  (CT: {'kapalı' if args.no_ct else 'crt.sh'})",
+                  file=sys.stderr)
+            res = osint.run(domain, dns, scope_check=scope_check, use_ct=not args.no_ct,
+                            max_subdomains=args.max)
+            if res.ct_error:
+                print(f"    [!] {res.ct_error} (DNS kontrolleri yine de yapıldı)", file=sys.stderr)
+            if res.truncated:
+                print(f"    [i] İlk {args.max} isim işlendi (--max ile artır)", file=sys.stderr)
+            # Kapsam dışı domain kayıtları (include_subdomains: false) raporda kalır ama
+            # aktif tarama izni RED görünür; böylece neyin bulunup neyin taranamayacağı net.
+            db.add_findings(scan_id, res.findings)
+            all_findings.extend(res.findings)
+        db.finish_scan(scan_id)
+
+    print(f"\nTarama #{scan_id} (done)\n")
+    print_findings(all_findings, verbose=args.verbose)
+    return 0
+
+
 def cmd_show(args: argparse.Namespace) -> int:
     with Storage(args.db) as db:
         if args.scan_id is None:
@@ -252,6 +356,13 @@ def build_parser() -> argparse.ArgumentParser:
     scn.add_argument("--ipv6", action="store_true", help="Çözümlenen IPv6 adreslerini de tara")
     scn.add_argument("-v", "--verbose", action="store_true", help="MITRE ve düzeltme önerilerini göster")
     scn.set_defaults(func=cmd_scan)
+
+    osi = sub.add_parser("osint", help="Pasif OSINT: crt.sh subdomain, SPF/DMARC/CAA, NS/MX")
+    osi.add_argument("domains", nargs="+")
+    osi.add_argument("--no-ct", action="store_true", help="crt.sh sorgusunu atla (sadece DNS)")
+    osi.add_argument("--max", type=int, default=300, help="İşlenecek en fazla subdomain (varsayılan 300)")
+    osi.add_argument("-v", "--verbose", action="store_true")
+    osi.set_defaults(func=cmd_osint)
 
     shw = sub.add_parser("show", help="Bir taramanın bulgularını göster (varsayılan: son)")
     shw.add_argument("scan_id", nargs="?", type=int)

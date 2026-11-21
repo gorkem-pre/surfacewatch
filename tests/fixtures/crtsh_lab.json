@@ -1,0 +1,10 @@
+[
+ {"issuer_name":"C=US, O=Let's Encrypt, CN=R11","common_name":"lab.example","name_value":"lab.example\nwww.lab.example"},
+ {"issuer_name":"C=US, O=Let's Encrypt, CN=R11","common_name":"*.lab.example","name_value":"*.lab.example"},
+ {"issuer_name":"C=US, O=Let's Encrypt, CN=R11","common_name":"dev.lab.example","name_value":"dev.lab.example"},
+ {"issuer_name":"C=US, O=Let's Encrypt, CN=R11","common_name":"docs.lab.example","name_value":"docs.lab.example"},
+ {"issuer_name":"C=US, O=Let's Encrypt, CN=R11","common_name":"old-blog.lab.example","name_value":"old-blog.lab.example"},
+ {"issuer_name":"C=US, O=Let's Encrypt, CN=R11","common_name":"legacy.lab.example","name_value":"LEGACY.lab.example."},
+ {"issuer_name":"C=US, O=Let's Encrypt, CN=R11","common_name":"cdn.lab.example","name_value":"cdn.lab.example"},
+ {"issuer_name":"C=US, O=Let's Encrypt, CN=R11","common_name":"x","name_value":"admin@lab.example\nevil-lab.example\nlab.example.attacker.com\nbad_name.lab.example"}
+]
