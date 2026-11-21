@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+# Gerçek kapsam ve tarama sonuçları özel bilgidir, repoya girmez
+scope.yml
+*.db
+reports/
