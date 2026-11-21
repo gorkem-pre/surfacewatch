@@ -281,6 +281,12 @@ def check_caa(domain: str, caa: list[str] | None) -> Finding:
     return Finding(domain, MODULE, "dns/caa", f"CAA: {len(caa)} kayıt", "info", {"records": sorted(caa)})
 
 
+def _mx_key(record: str) -> tuple[int, str]:
+    """'10 mail.x' -> (10, 'mail.x'): öncelik sayısal sıralanır (1, 5, 10; '1, 10, 5' değil)."""
+    pref, _, host = record.partition(" ")
+    return (int(pref) if pref.isdigit() else 1 << 16, host.lower())
+
+
 def dns_inventory(domain: str, dns: DnsClient) -> list[Finding]:
     """NS / MX envanteri. Diff motoru bu kayıtların değişimini yakalar
     (ör. NS değişti -> domain ele geçirilmiş olabilir)."""
@@ -293,8 +299,9 @@ def dns_inventory(domain: str, dns: DnsClient) -> list[Finding]:
                            "registrar hesabında 2FA ve registrar lock kullan."))
     mx = _safe(dns, domain, "MX")
     if mx:
-        out.append(Finding(domain, MODULE, "dns/mx", f"MX: {', '.join(sorted(mx))}", "info",
-                           {"records": sorted(mx)}, ["T1590.002"]))
+        mx = sorted(mx, key=_mx_key)
+        out.append(Finding(domain, MODULE, "dns/mx", f"MX: {', '.join(mx)}", "info",
+                           {"records": mx}, ["T1590.002"]))
     return out
 
 

@@ -215,3 +215,9 @@ def test_cli_osint_does_not_reresolve_for_scope(cli_env):
     # Kapsam kontrolü önceden çözülen IP'leri kullanmalı; aynı isim için ek A sorgusu olmamalı
     a_queries = [c for c in dns.calls if c == (D, "A")]
     assert len(a_queries) == 1
+
+
+def test_mx_sorted_numerically():
+    dns = lab_dns(records={(D, "MX"): ["10 b.example", "1 a.example", "5 c.example", "10 a2.example"]})
+    f = by_key(run_lab(dns=dns, use_ct=False))
+    assert f["dns/mx"].data["records"] == ["1 a.example", "5 c.example", "10 a2.example", "10 b.example"]

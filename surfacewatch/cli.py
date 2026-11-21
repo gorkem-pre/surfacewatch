@@ -7,6 +7,7 @@
 
     surfacewatch scan <hedef>...          ağ taraması (red)
     surfacewatch osint <domain>...        pasif OSINT: subdomain, SPF/DMARC, DNS
+    surfacewatch web <url>... | --from-scan   web yapılandırma kontrolleri
     surfacewatch show [scan_id]           tarama bulgularını göster
 
 watch (blue / diff) komutu Modül 6'da eklenecek.
@@ -20,7 +21,7 @@ from pathlib import Path
 
 from . import __version__
 from .core import SEVERITIES, Finding, Scope, ScopeError, Storage, TargetType, classify
-from .modules import network, osint
+from .modules import network, osint, web
 from .modules.dnsclient import DnsClient, DnsError, DnspythonClient
 
 SCOPE_TEMPLATE = """\
@@ -157,6 +158,21 @@ def _print_osint(findings: list[Finding], verbose: bool, color: bool) -> None:
             print(f"          (+{hidden} çözülmeyen eski kayıt gizlendi; görmek için -v)")
 
 
+def _print_web(findings: list[Finding], verbose: bool, color: bool) -> None:
+    order = {s: i for i, s in enumerate(SEVERITIES)}
+    for target in sorted({f.target for f in findings}):
+        group = sorted((f for f in findings if f.target == target), key=lambda f: (-order[f.severity], f.key))
+        shown = group if verbose else [f for f in group if f.severity != "info"]
+        print(f"{target}  ({len(group)} kontrol, {len(group) - len(shown)} gizli bilgi)" if not verbose
+              else target)
+        for f in shown:
+            print(f"{_sev(f.severity, color)}  {f.title}")
+            _print_details(f, verbose)
+        if not shown:
+            print("          Sorun bulunmadı.")
+        print()
+
+
 def _print_details(f: Finding, verbose: bool, show_title: bool = False) -> None:
     if show_title:
         print(f"          {f.title}")
@@ -175,14 +191,15 @@ def print_findings(findings: list[Finding], verbose: bool = False) -> None:
     if not findings:
         print("Bulgu yok.")
         return
-    net = [f for f in findings if f.module == network.MODULE]
-    osi = [f for f in findings if f.module == osint.MODULE]
-    if net:
-        _print_network(net, verbose, color)
-    if osi:
-        if net:
-            print()
-        _print_osint(osi, verbose, color)
+    printers = [(network.MODULE, _print_network), (osint.MODULE, _print_osint), (web.MODULE, _print_web)]
+    first = True
+    for module, printer in printers:
+        part = [f for f in findings if f.module == module]
+        if part:
+            if not first:
+                print()
+            printer(part, verbose, color)
+            first = False
     counts = {s: sum(1 for f in findings if f.severity == s) for s in reversed(SEVERITIES)}
     print("\n" + f"{len(findings)} bulgu  " + "  ".join(f"{k}: {v}" for k, v in counts.items() if v))
 
@@ -301,6 +318,91 @@ def cmd_osint(args: argparse.Namespace) -> int:
     return 0
 
 
+def make_transport() -> web.HttpTransport:
+    return web.HttpTransport()
+
+
+def _web_targets_from_scan(db: Storage, scan_id: int | None) -> list[tuple[str, str, int, str | None]]:
+    """Ağ taramasında bulunan http/https servislerinden web hedefleri üretir."""
+    if scan_id is None or scan_id < 0:
+        scans = [s for s in db.list_scans(limit=50) if network.MODULE in s.modules and s.status == "done"]
+        if not scans:
+            raise ScopeError("Ağ taraması bulunamadı; önce: surfacewatch scan <hedef>")
+        scan_id = scans[0].id
+    out = []
+    for f in db.findings(scan_id):
+        if f.module != network.MODULE:
+            continue
+        svc = f.data.get("service", "")
+        if svc in ("http", "https", "http-proxy", "https-alt") or svc.startswith("http"):
+            scheme = "https" if svc.startswith("https") or f.data.get("tunnel") == "ssl" else "http"
+            out.append((scheme, f.data.get("hostname") or f.target, int(f.data["port"]), f.target))
+    return out
+
+
+def cmd_web(args: argparse.Namespace) -> int:
+    scope = _load_scope(args)
+    planned: list[tuple[str, str, int, str | None]] = []  # scheme, host, port, bilinen ip
+    if args.from_scan is not None:
+        with Storage(args.db) as db:
+            planned += _web_targets_from_scan(db, args.from_scan)
+        print(f"[i] Ağ taramasından {len(planned)} web servisi alındı", file=sys.stderr)
+    for raw in args.targets:
+        try:
+            planned += [(sch, h, p, None) for sch, h, p in web.parse_target(raw)]
+        except ValueError as exc:
+            print(f"[-] {exc}", file=sys.stderr)
+    if not planned:
+        print("[!] Web hedefi yok (URL ver ya da --from-scan kullan).", file=sys.stderr)
+        return 2
+
+    targets: list[web.WebTarget] = []
+    for scheme, host, port, known_ip in planned:
+        d = scope.check(host, active=True)
+        if not d.allowed:
+            print(f"[-] ATLANDI {scheme}://{host}:{port}: {d.reason}", file=sys.stderr)
+            continue
+        if classify(host) == TargetType.IP:
+            ip = host
+        else:
+            ips = [i for i in d.resolved if ":" not in i] or (list(d.resolved) if args.ipv6 else [])
+            if known_ip and known_ip in d.resolved:
+                ip = known_ip
+            elif ips:
+                ip = ips[0]
+            else:
+                print(f"[-] ATLANDI {host}: IPv4 adresi yok (--ipv6)", file=sys.stderr)
+                continue
+        t = web.WebTarget(scheme, host, ip, port)
+        if t not in targets:
+            targets.append(t)
+    if not targets:
+        print("[!] Taranacak kapsam içi web hedefi yok.", file=sys.stderr)
+        return 2
+
+    transport = make_transport()
+    with Storage(args.db) as db:
+        scan_id = db.start_scan(scope.name, [web.MODULE], [t.url for t in targets])
+        all_findings: list[Finding] = []
+        ok = 0
+        for t in targets:
+            print(f"[*] Web: {t.url}  (IP {t.ip})", file=sys.stderr)
+            res = web.run(t, transport, check_files_enabled=not args.no_files)
+            if res.error:
+                print(f"    [!] Bağlanılamadı: {res.error}", file=sys.stderr)
+                continue
+            ok += 1
+            print(f"    HTTP {res.status}, {len(res.findings)} kontrol", file=sys.stderr)
+            db.add_findings(scan_id, res.findings)
+            all_findings.extend(res.findings)
+        status = "done" if ok else "failed"
+        db.finish_scan(scan_id, status)
+
+    print(f"\nTarama #{scan_id} ({status})\n")
+    print_findings(all_findings, verbose=args.verbose)
+    return 0 if ok else 2
+
+
 def cmd_show(args: argparse.Namespace) -> int:
     with Storage(args.db) as db:
         if args.scan_id is None:
@@ -363,6 +465,15 @@ def build_parser() -> argparse.ArgumentParser:
     osi.add_argument("--max", type=int, default=300, help="İşlenecek en fazla subdomain (varsayılan 300)")
     osi.add_argument("-v", "--verbose", action="store_true")
     osi.set_defaults(func=cmd_osint)
+
+    wb = sub.add_parser("web", help="Web yapılandırma kontrolleri (header, TLS, açık dosyalar)")
+    wb.add_argument("targets", nargs="*", help="ornek.com, https://ornek.com, 10.0.0.5:8080")
+    wb.add_argument("--from-scan", nargs="?", type=int, const=-1, metavar="SCAN_ID",
+                    help="Ağ taramasında bulunan http/https servislerini kullan (varsayılan: son tarama)")
+    wb.add_argument("--no-files", action="store_true", help="Hassas dosya ve robots.txt kontrolünü atla")
+    wb.add_argument("--ipv6", action="store_true")
+    wb.add_argument("-v", "--verbose", action="store_true")
+    wb.set_defaults(func=cmd_web)
 
     shw = sub.add_parser("show", help="Bir taramanın bulgularını göster (varsayılan: son)")
     shw.add_argument("scan_id", nargs="?", type=int)

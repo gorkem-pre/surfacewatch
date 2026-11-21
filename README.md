@@ -18,7 +18,7 @@ SurfaceWatch, kendi sistemlerinin saldırı yüzeyini iki açıdan inceleyen bir
 | 1. Çekirdek: kapsam kontrolü, SQLite kayıt, CLI | ✅ |
 | 2. Ağ: Nmap entegrasyonu, servis/sürüm tespiti, MITRE + düzeltme bilgi tabanı | ✅ |
 | 3. Pasif OSINT: crt.sh subdomain keşfi, subdomain takeover adayı, SPF/DMARC/CAA, NS/MX | ✅ |
-| 4. Web: güvenlik header'ları, TLS, açık hassas dosyalar | ⏳ |
+| 4. Web: güvenlik header'ları, TLS, cookie bayrakları, açık hassas dosyalar | ✅ |
 | 5. Zafiyet: sürüm → CVE (NVD) | ⏳ |
 | 6. Diff motoru + HTML/JSON rapor | ⏳ |
 
@@ -139,6 +139,35 @@ INFO      cdn.ornek.com            104.16.1.1        RED
 | Hassas isimler | `dev`, `staging`, `jenkins`, `admin`... | İç ortamların internete açık kalması |
 | NS / MX envanteri | Kayıtların listesi | Diff motoru NS değişimini yakalar (domain ele geçirme işareti) |
 
+**6. Web kontrolleri**
+
+```bash
+surfacewatch web http://scanme.nmap.org       # tek hedef
+surfacewatch web ornek.com                    # şema yoksa http:80 ve https:443 denenir
+surfacewatch web --from-scan                  # son ağ taramasında bulunan tüm http/https servisleri
+surfacewatch web 192.168.56.10:8080 -v --no-files
+```
+
+```
+http://127.0.0.1:8099  (9 kontrol, 3 gizli bilgi)
+HIGH      Git deposu açıkta (.git): http://127.0.0.1:8099/.git/HEAD
+MEDIUM    HTTP şifresiz servis ediliyor, HTTPS'e yönlendirme yok
+LOW       Sürüm bilgisi ifşa ediliyor: server: SimpleHTTP/0.6 Python/3.13
+LOW       Clickjacking koruması yok (X-Frame-Options / frame-ancestors)
+```
+
+| Kontrol | Ne arar |
+|---|---|
+| Yönlendirme | HTTP'nin 301 ile HTTPS'e gidip gitmediği |
+| Header'lar | HSTS (ve max-age), CSP, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, clickjacking koruması |
+| Bilgi ifşası | `Server` / `X-Powered-By` içinde sürüm numarası |
+| Cookie | Oturum cookie'lerinde Secure, HttpOnly, SameSite eksikliği |
+| TLS | Sertifika doğrulama hatası, kalan gün, TLS 1.0/1.1 kabulü |
+| Hassas dosyalar | `.git/HEAD`, `.env`, `.svn`, `.DS_Store`, `server-status`, `phpinfo.php` |
+| robots.txt | Gizlenmeye çalışılan yollar (bilgi) |
+
+Hedef başına yaklaşık 10 istek gönderilir ve istekler arasında bekleme vardır. Hassas dosyalarda sadece HTTP 200'e bakılmaz, içerik de doğrulanır (ör. `.git/HEAD` gerçekten `ref: refs/...` ile mi başlıyor). Böylece her yola 200 dönen sunucularda yanlış alarm verilmez.
+
 **Diğer seçenekler**
 
 ```bash
@@ -162,9 +191,10 @@ Kapsam kontrolü aracın en kritik parçasıdır ve tüm aktif modüller ondan g
 4. **Aşırı geniş kapsam reddedilir:** /16'dan büyük ağlar kabul edilmez.
 5. **Pasif / aktif ayrımı:** CT log ve DNS sorgusu gibi hedefe paket göndermeyen işlemler sadece domain kuralına bakar.
 6. **IP sabitleme (TOCTOU koruması):** Domain taranırken Nmap'e hostname değil, kapsam kontrolünde çözümlenen IP verilir. Kontrol ile tarama arasında DNS kaydı değişse bile (DNS rebinding) kontrol edilen adres taranan adrestir.
-7. **Enjeksiyon yok:** Nmap `shell=True` olmadan liste argümanlarla çağrılır; hedef `ipaddress` ile, port listesi regex'siz sayısal kontrolle doğrulanır.
-8. **Yanlış negatife karşı uyarı:** Her host için açık/filtreli/kapalı port sayısı ve RTT gösterilir. Hiç açık port yoksa ya da RTT uzak bir host için gerçekçi değilse (ör. VirtualBox NAT'ın kendi verdiği 0.2 ms'lik cevap), araç sonucun yanıltıcı olabileceğini söyler. Tek IP hedeflerde varsayılan olarak `-Pn` kullanılır.
-9. **Hız sınırı:** `options.max_rate` (varsayılan 100 paket/sn) her taramaya uygulanır. NSE script'leri çalıştırılmaz.
+7. **Web isteklerinde de IP sabitleme:** HTTP bağlantısı doğrulanmış IP'ye açılır; `Host` header'ı ve TLS SNI orijinal hostname ile gönderilir.
+8. **Enjeksiyon yok:** Nmap `shell=True` olmadan liste argümanlarla çağrılır; hedef `ipaddress` ile, port listesi regex'siz sayısal kontrolle doğrulanır.
+9. **Yanlış negatife karşı uyarı:** Her host için açık/filtreli/kapalı port sayısı ve RTT gösterilir. Hiç açık port yoksa ya da RTT uzak bir host için gerçekçi değilse (ör. VirtualBox NAT'ın kendi verdiği 0.2 ms'lik cevap), araç sonucun yanıltıcı olabileceğini söyler. Tek IP hedeflerde varsayılan olarak `-Pn` kullanılır.
+10. **Hız sınırı:** `options.max_rate` (varsayılan 100 paket/sn) her taramaya uygulanır. NSE script'leri çalıştırılmaz.
 
 ## Mimari
 
@@ -178,6 +208,7 @@ surfacewatch/
 │   ├── network.py   nmap komutu, XML parse, Finding üretimi
 │   ├── knowledge.py servis → önem, MITRE, düzeltme bilgi tabanı
 │   ├── osint.py     crt.sh, subdomain analizi, SPF/DMARC/CAA
+│   ├── web.py       header, TLS, cookie, hassas dosya kontrolleri
 │   └── dnsclient.py DNS arayüzü (dnspython / testler için FakeDns)
 └── cli.py
 ```
