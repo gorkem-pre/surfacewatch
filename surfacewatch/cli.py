@@ -5,7 +5,10 @@
     surfacewatch scope check <hedef>      hedef taranabilir mi?
     surfacewatch scans                    geçmiş taramalar
 
-scan (red) ve watch (blue) komutları sonraki modüllerde eklenecek.
+    surfacewatch scan <hedef>...          ağ taraması (red)
+    surfacewatch show [scan_id]           tarama bulgularını göster
+
+watch (blue / diff) komutu Modül 6'da eklenecek.
 """
 
 from __future__ import annotations
@@ -15,7 +18,8 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .core import Scope, ScopeError, Storage
+from .core import SEVERITIES, Finding, Scope, ScopeError, Storage, TargetType, classify
+from .modules import network
 
 SCOPE_TEMPLATE = """\
 # SurfaceWatch kapsam dosyası
@@ -39,6 +43,9 @@ options:
   # Kapsamdaki bir domain kapsam dışı bir IP'ye çözülürse (CDN, SaaS)
   # aktif tarama reddedilir. Bunu kapatmak bilinçli bir karar olmalı.
   allow_unscoped_resolution: false
+  # Saniyede gönderilecek en fazla paket. Düşük tutmak hem hedefe saygı
+  # hem de IDS/IPS'e takılmamak için. scanme.nmap.org için 100 yeterli.
+  max_rate: 100
 """
 
 
@@ -99,6 +106,116 @@ def cmd_scans(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- scan / show
+_SEV_COLOR = {"critical": "1;97;41", "high": "1;91", "medium": "1;93", "low": "94", "info": "90"}
+
+
+def _sev(sev: str, color: bool) -> str:
+    text = f"{sev.upper():<8}"
+    return f"\033[{_SEV_COLOR.get(sev, '0')}m{text}\033[0m" if color else text
+
+
+def print_findings(findings: list[Finding], verbose: bool = False) -> None:
+    color = sys.stdout.isatty()
+    if not findings:
+        print("Açık port bulunamadı.")
+        return
+    order = {s: i for i, s in enumerate(SEVERITIES)}
+    findings = sorted(findings, key=lambda f: (f.target, -order[f.severity], f.data.get("port", 0)))
+    print(f"{'ÖNEM':<8}  {'HEDEF':<18} {'PORT':<10} {'SERVİS':<14} SÜRÜM")
+    for f in findings:
+        d = f.data
+        banner = " ".join(x for x in (d.get("product"), d.get("version")) if x)
+        print(f"{_sev(f.severity, color)}  {f.target:<18} {f.key:<10} {d.get('service', ''):<14} {banner}")
+        if verbose:
+            if d.get("note"):
+                print(f"          risk   : {d['note']}")
+            print(f"          MITRE  : {', '.join(f.mitre)}")
+            print(f"          düzelt : {f.remediation}")
+    counts = {s: sum(1 for f in findings if f.severity == s) for s in reversed(SEVERITIES)}
+    print("\n" + f"{len(findings)} bulgu  " + "  ".join(f"{k}: {v}" for k, v in counts.items() if v))
+
+
+def _plan_targets(scope: Scope, targets: list[str], ipv6: bool) -> list[tuple[str, str | None]]:
+    """Kapsam kontrolü + taranacak (IP/CIDR, hostname) listesi."""
+    plan: list[tuple[str, str | None]] = []
+    for t in targets:
+        d = scope.check(t, active=True)
+        if not d.allowed:
+            print(f"[-] ATLANDI {d.target}: {d.reason}", file=sys.stderr)
+            continue
+        if classify(t) == TargetType.DOMAIN:
+            pairs = [(ip, d.target) for ip in d.resolved]
+        else:
+            pairs = [(d.target, None)]
+        for ip, host in pairs:
+            if ":" in ip and not ipv6:
+                print(f"[i] IPv6 atlandı {ip} (dahil etmek için --ipv6)", file=sys.stderr)
+                continue
+            plan.append((ip, host))
+    return plan
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    scope = _load_scope(args)
+    plan = _plan_targets(scope, args.targets, args.ipv6)
+    if not plan:
+        print("[!] Taranacak kapsam içi hedef yok.", file=sys.stderr)
+        return 2
+
+    with Storage(args.db) as db:
+        scan_id = db.start_scan(scope.name, [network.MODULE], [ip for ip, _ in plan])
+        all_findings: list[Finding] = []
+        errors = 0
+        for ip, host in plan:
+            label = f"{host} ({ip})" if host else ip
+            print(f"[*] Taranıyor: {label}  profil={args.profile}  max_rate={scope.max_rate}", file=sys.stderr)
+            try:
+                result = network.scan(ip, hostname=host, profile=args.profile, ports=args.ports,
+                                      max_rate=scope.max_rate, no_ping=args.ping_mode)
+            except (network.NmapError, ValueError) as exc:
+                print(f"[!] {label}: {exc}", file=sys.stderr)
+                errors += 1
+                continue
+            if args.verbose:
+                print(f"    $ {' '.join(result.command)}", file=sys.stderr)
+            if not result.hosts:
+                print(f"[!] {label}: Nmap hiç host raporlamadı (hepsi kapalı/yanıtsız).", file=sys.stderr)
+            for h in result.hosts:
+                rtt = f", RTT {h.rtt_us / 1000:.1f} ms" if h.rtt_us is not None else ""
+                print(f"    {h.address}: {h.state}, {h.count('open')} açık, "
+                      f"{h.count('filtered')} filtreli, {h.count('closed')} kapalı{rtt}", file=sys.stderr)
+                if h.suspicious:
+                    print(f"    [!] {h.suspicious}", file=sys.stderr)
+            db.add_findings(scan_id, result.findings)
+            all_findings.extend(result.findings)
+        status = "failed" if errors == len(plan) else "done"
+        db.finish_scan(scan_id, status)
+
+    print(f"\nTarama #{scan_id} ({status})\n")
+    print_findings(all_findings, verbose=args.verbose)
+    return 2 if status == "failed" else 0
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    with Storage(args.db) as db:
+        if args.scan_id is None:
+            scans = db.list_scans(limit=1)
+            if not scans:
+                print("Henüz tarama yok.")
+                return 0
+            scan = scans[0]
+        else:
+            scan = db.get_scan(args.scan_id)
+            if scan is None:
+                print(f"[!] Tarama #{args.scan_id} bulunamadı", file=sys.stderr)
+                return 2
+        findings = db.findings(scan.id)
+    print(f"Tarama #{scan.id}  {scan.scope_name}  {scan.started_at}  {scan.status}\n")
+    print_findings(findings, verbose=args.verbose)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="surfacewatch",
                                 description="Kapsam kontrollü saldırı yüzeyi tarama ve izleme")
@@ -120,6 +237,26 @@ def build_parser() -> argparse.ArgumentParser:
     chk.add_argument("--passive", action="store_true",
                      help="Pasif işlem kontrolü (DNS çözümlemesi gerektirmez)")
     chk.set_defaults(func=cmd_scope_check)
+
+    scn = sub.add_parser("scan", help="Kapsam içi hedeflerde ağ taraması (nmap)")
+    scn.add_argument("targets", nargs="+", help="IP, CIDR veya domain")
+    scn.add_argument("--profile", choices=list(network.PROFILES), default="default",
+                     help="quick=top100, default=top1000, full=tüm portlar")
+    scn.add_argument("-p", "--ports", help="Port listesi (ör. 22,80,443 veya 1-1024); profili ezer")
+    ping = scn.add_mutually_exclusive_group()
+    ping.add_argument("--no-ping", dest="ping_mode", action="store_const", const=True,
+                      help="Host keşfini her zaman atla (-Pn). Tek IP'de zaten varsayılan.")
+    ping.add_argument("--ping", dest="ping_mode", action="store_const", const=False,
+                      help="Host keşfini tek IP'de de zorla")
+    scn.set_defaults(ping_mode=None)
+    scn.add_argument("--ipv6", action="store_true", help="Çözümlenen IPv6 adreslerini de tara")
+    scn.add_argument("-v", "--verbose", action="store_true", help="MITRE ve düzeltme önerilerini göster")
+    scn.set_defaults(func=cmd_scan)
+
+    shw = sub.add_parser("show", help="Bir taramanın bulgularını göster (varsayılan: son)")
+    shw.add_argument("scan_id", nargs="?", type=int)
+    shw.add_argument("-v", "--verbose", action="store_true")
+    shw.set_defaults(func=cmd_show)
 
     ls = sub.add_parser("scans", help="Geçmiş taramaları listele")
     ls.add_argument("--limit", type=int, default=20)

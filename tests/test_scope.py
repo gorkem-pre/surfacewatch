@@ -102,3 +102,10 @@ def test_wildcard_and_trailing_dot_normalized():
     s = Scope.from_dict({"targets": {"domains": ["*.Example.COM."]}})
     assert s.domains[0].name == "example.com"
     assert s.check("API.example.com.", active=False)
+
+
+def test_max_rate_option():
+    assert make().max_rate == 100
+    assert make(options={"max_rate": 20}).max_rate == 20
+    with pytest.raises(ScopeError):
+        make(options={"max_rate": 100000})

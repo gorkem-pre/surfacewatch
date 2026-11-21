@@ -16,7 +16,7 @@ SurfaceWatch, kendi sistemlerinin saldırı yüzeyini iki açıdan inceleyen bir
 | Modül | Durum |
 |---|---|
 | 1. Çekirdek: kapsam kontrolü, SQLite kayıt, CLI | ✅ |
-| 2. Ağ: Nmap entegrasyonu, servis/sürüm tespiti | ⏳ |
+| 2. Ağ: Nmap entegrasyonu, servis/sürüm tespiti, MITRE + düzeltme bilgi tabanı | ✅ |
 | 3. Pasif OSINT: Certificate Transparency, DNS | ⏳ |
 | 4. Web: güvenlik header'ları, TLS, açık hassas dosyalar | ⏳ |
 | 5. Zafiyet: sürüm → CVE (NVD) | ⏳ |
@@ -37,6 +37,20 @@ pip install -e ".[dev]"
 surfacewatch init                                  # scope.yml şablonu
 surfacewatch scope show
 surfacewatch scope check 192.168.56.10 8.8.8.8 cdn.lab.local
+
+surfacewatch scan scanme.nmap.org -v              # kapsam kontrolü → nmap → bulgular
+surfacewatch scan 192.168.56.0/28 --profile quick
+surfacewatch scan 192.168.56.10 -p 22,80,443
+surfacewatch show                                 # son taramanın bulguları
+surfacewatch scans                                # tarama geçmişi
+```
+
+```
+ÖNEM      HEDEF              PORT       SERVİS         SÜRÜM
+INFO      45.33.32.156       tcp/22     ssh            OpenSSH 6.6.1p1 Ubuntu 2ubuntu2.13
+          risk   : Uzaktan yönetim kapısı; brute force'un ilk hedefi.
+          MITRE  : T1021.004, T1046, T1110
+          düzelt : Parola ile girişi kapat (PasswordAuthentication no), sadece anahtar kullan; ...
 ```
 
 ```
@@ -54,6 +68,10 @@ Kapsam kontrolü aracın en kritik parçasıdır ve tüm aktif modüller ondan g
 3. **Sonek hilelerine karşı:** `evil-lab.local` ve `lab.local.evil.com`, `lab.local` kapsamına girmez.
 4. **Aşırı geniş kapsam reddedilir:** /16'dan büyük ağlar kabul edilmez.
 5. **Pasif / aktif ayrımı:** CT log ve DNS sorgusu gibi hedefe paket göndermeyen işlemler sadece domain kuralına bakar.
+6. **IP sabitleme (TOCTOU koruması):** Domain taranırken Nmap'e hostname değil, kapsam kontrolünde çözümlenen IP verilir. Kontrol ile tarama arasında DNS kaydı değişse bile (DNS rebinding) kontrol edilen adres taranan adrestir.
+7. **Enjeksiyon yok:** Nmap `shell=True` olmadan liste argümanlarla çağrılır; hedef `ipaddress` ile, port listesi regex'siz sayısal kontrolle doğrulanır.
+8. **Yanlış negatife karşı uyarı:** Her host için açık/filtreli/kapalı port sayısı ve RTT gösterilir. Hiç açık port yoksa ya da RTT uzak bir host için gerçekçi değilse (ör. VirtualBox NAT'ın kendi verdiği 0.2 ms'lik cevap), araç sonucun yanıltıcı olabileceğini söyler. Tek IP hedeflerde varsayılan olarak `-Pn` kullanılır.
+9. **Hız sınırı:** `options.max_rate` (varsayılan 100 paket/sn) her taramaya uygulanır. NSE script'leri çalıştırılmaz.
 
 ## Mimari
 
@@ -63,7 +81,9 @@ surfacewatch/
 │   ├── scope.py     kapsam yükleme, doğrulama ve karar (Decision + gerekçe)
 │   ├── models.py    Finding: tüm modüllerin ortak bulgu formatı (MITRE + remediation)
 │   └── storage.py   SQLite: scans / findings, diff için son iki tarama
-├── modules/         network, osint, web, vuln (sırayla eklenecek)
+├── modules/
+│   ├── network.py   nmap komutu, XML parse, Finding üretimi
+│   └── knowledge.py servis → önem, MITRE, düzeltme bilgi tabanı
 └── cli.py
 ```
 
@@ -79,6 +99,3 @@ ruff check .
 ## Lisans
 
 MIT
-## Geliştirme notu
-Bu proje AI asistanı (Claude) desteğiyle geliştirildi; tasarım kararları,
-test ve doğrulama tarafımdan yapıldı.

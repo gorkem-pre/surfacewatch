@@ -71,6 +71,7 @@ class Scope:
     exclude_networks: list[IPNetwork] = field(default_factory=list)
     exclude_domains: list[DomainRule] = field(default_factory=list)
     allow_unscoped_resolution: bool = False
+    max_rate: int = 100          # nmap --max-rate (paket/sn); hedefi yormamak için
     name: str = "default"
 
     # ----------------------------------------------------------- yükleme
@@ -103,8 +104,11 @@ class Scope:
             exclude_networks=ex_nets,
             exclude_domains=ex_domains,
             allow_unscoped_resolution=bool(options.get("allow_unscoped_resolution", False)),
+            max_rate=int(options.get("max_rate", 100)),
             name=str(data.get("name", "default")),
         )
+        if not 1 <= scope.max_rate <= 5000:
+            raise ScopeError("options.max_rate 1-5000 arasında olmalı")
         if not scope.networks and not scope.domains:
             raise ScopeError("Kapsamda hiç hedef yok (targets.networks / hosts / domains)")
         for net in scope.networks:
