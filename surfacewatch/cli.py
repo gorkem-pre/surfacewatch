@@ -9,6 +9,9 @@
     surfacewatch osint <domain>...        pasif OSINT: subdomain, SPF/DMARC, DNS
     surfacewatch web <url>... | --from-scan   web yapılandırma kontrolleri
     surfacewatch vuln [--from-scan ID]    servis sürümleri -> bilinen CVE'ler (NVD)
+    surfacewatch diff [YENI] [ESKI]       iki tarama arasında ne değişti (blue)
+    surfacewatch watch <hedef>...         tara + bir öncekiyle karşılaştır (cron için)
+    surfacewatch report -o rapor.html     tüm modüllerin son taramaları + değişiklikler
     surfacewatch show [scan_id]           tarama bulgularını göster
 
 watch (blue / diff) komutu Modül 6'da eklenecek.
@@ -22,8 +25,10 @@ from pathlib import Path
 
 from . import __version__
 from .core import SEVERITIES, Finding, Scope, ScopeError, Storage, TargetType, classify
+from .core.diff import DiffResult, diff_scans
 from .modules import network, osint, vuln, web
 from .modules.dnsclient import DnsClient, DnsError, DnspythonClient
+from .report import render_html
 
 SCOPE_TEMPLATE = """\
 # SurfaceWatch kapsam dosyası
@@ -179,15 +184,18 @@ def _print_vuln(findings: list[Finding], verbose: bool, color: bool) -> None:
     for f in sorted(findings, key=lambda f: (-order[f.severity], f.target, f.key)):
         print(f"{_sev(f.severity, color)}  {f.target:<16} {f.data.get('port', ''):<9} {f.title}")
         cves = f.data.get("cves", [])
-        limit = len(cves) if verbose else 5
+        limit = 20 if verbose else 5
+        width = 110 if verbose else 80
         for c in cves[:limit]:
             kev = " KEV" if c.get("kev") else ""
             score = f"{c['score']:.1f}" if c.get("score") is not None else " ?  "
-            desc = c.get("description", "")
-            desc = (desc[:90] + "...") if len(desc) > 93 and not verbose else desc
+            desc = " ".join(str(c.get("description", "")).split())   # eski kayıtlarda satır sonu olabilir
+            desc = (desc[: width - 3] + "...") if len(desc) > width else desc
             print(f"          {c['id']:<16} {score:>4}{kev:<4} {desc}")
-        if len(cves) > limit:
-            print(f"          ... +{len(cves) - limit} CVE daha (tamamı için -v)")
+        total = f.data.get("count", len(cves))
+        if total > limit:
+            hint = "HTML raporda: surfacewatch report" if verbose else "-v ile 20 tanesi, tamamı: surfacewatch report"
+            print(f"          ... +{total - limit} CVE daha ({hint})")
         if f.data.get("note") and (verbose or f.data.get("distro_build")):
             print(f"          not    : {f.data['note']}")
         if verbose and f.remediation:
@@ -474,6 +482,120 @@ def cmd_vuln(args: argparse.Namespace) -> int:
     return 0 if status == "done" else 2
 
 
+# ---------------------------------------------------------------- diff / watch / report
+def print_diff(d: DiffResult, verbose: bool = False) -> None:
+    color = sys.stdout.isatty()
+
+    def c(code: str, text: str) -> str:
+        return f"\033[{code}m{text}\033[0m" if color else text
+
+    print(f"Tarama #{d.old_scan.id} ({d.old_scan.started_at}) -> #{d.new_scan.id} ({d.new_scan.started_at})"
+          f"  [{', '.join(d.new_scan.modules)}]")
+    if not d.has_changes:
+        print(c("32", "Değişiklik yok.") + f"  ({d.unchanged} bulgu aynı)")
+        return
+    for f in d.new:
+        print(f"{c('1;31', '+ YENİ    ')} {_sev(f.severity, color)}  {f.target:<18} {f.title}")
+        if verbose and f.remediation:
+            print(f"                              düzelt : {f.remediation}")
+    for ch in d.changed:
+        arrow = "kötüleşti" if ch.severity_delta > 0 else ("iyileşti" if ch.severity_delta < 0 else "değişti")
+        print(f"{c('1;33', '~ DEĞİŞTİ ')} {_sev(ch.new.severity, color)}  {ch.new.target:<18} {ch.new.title}  ({arrow})")
+        for k, (o, n) in list(ch.fields.items())[: (10 if verbose else 3)]:
+            o_s, n_s = str(o), str(n)
+            o_s = o_s if len(o_s) < 60 else o_s[:57] + "..."
+            n_s = n_s if len(n_s) < 60 else n_s[:57] + "..."
+            print(f"                              {k}: {o_s} -> {n_s}")
+    for f in d.resolved:
+        print(f"{c('1;32', '- KAPANDI ')} {_sev(f.severity, color)}  {f.target:<18} {f.title}")
+    extra = f", {d.not_rescanned} tekrar taranmadı" if d.not_rescanned else ""
+    print(f"\n{len(d.new)} yeni, {len(d.changed)} değişen, {len(d.resolved)} kapanan, {d.unchanged} aynı{extra}")
+
+
+def _fail_code(d: DiffResult | None, fail_on: str | None) -> int:
+    if d is None or fail_on is None:
+        return 0
+    worst = d.worst_new()
+    order = {s: i for i, s in enumerate(SEVERITIES)}
+    return 1 if worst is not None and order[worst] >= order[fail_on] else 0
+
+
+def cmd_diff(args: argparse.Namespace) -> int:
+    with Storage(args.db) as db:
+        new_id = args.new
+        if new_id is None:
+            scans = [s for s in db.list_scans(limit=1)]
+            if not scans:
+                print("Henüz tarama yok.")
+                return 0
+            new_id = scans[0].id
+        try:
+            d = diff_scans(db, new_id, args.old)
+        except ValueError as exc:
+            print(f"[!] {exc}", file=sys.stderr)
+            return 2
+    if d is None:
+        print(f"Tarama #{new_id} için karşılaştırılacak önceki tarama yok "
+              "(aynı kapsam + aynı modül + örtüşen hedef gerekir).")
+        return 0
+    print_diff(d, verbose=args.verbose)
+    return _fail_code(d, args.fail_on)
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    args.verbose = False
+    if args.quiet:
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = cmd_scan(args)
+    else:
+        rc = cmd_scan(args)
+    if rc == 2:
+        return 2
+    with Storage(args.db) as db:
+        latest = db.list_scans(limit=1)[0]
+        d = diff_scans(db, latest.id)
+    print("\n=== Değişiklikler ===")
+    if d is None:
+        print("İlk tarama: karşılaştırma için referans kaydedildi.")
+        return 0
+    print_diff(d)
+    return _fail_code(d, args.fail_on)
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    scope = _load_scope(args)
+    with Storage(args.db) as db:
+        if args.scans:
+            picked = [db.get_scan(i) for i in args.scans]
+            missing = [i for i, s in zip(args.scans, picked, strict=True) if s is None]
+            if missing:
+                print(f"[!] Bulunamayan tarama: {missing}", file=sys.stderr)
+                return 2
+        else:
+            # Her modül kombinasyonu için kapsamın en son başarılı taraması
+            picked, seen = [], set()
+            for sc in db.list_scans(scope_name=scope.name, limit=500):
+                key = tuple(sorted(sc.modules))
+                if sc.status == "done" and key not in seen:
+                    seen.add(key)
+                    picked.append(sc)
+        if not picked:
+            print(f"[!] '{scope.name}' kapsamı için tamamlanmış tarama yok.", file=sys.stderr)
+            return 2
+        order = ["network", "vuln", "web", "osint"]
+        picked.sort(key=lambda s: min((order.index(m) for m in s.modules if m in order), default=9))
+        scans = [(sc, db.findings(sc.id)) for sc in picked]
+        diffs = [d for sc in picked if (d := diff_scans(db, sc.id)) is not None and d.has_changes]
+
+    html = render_html(scope.name, scans, diffs, hide_info=not args.include_info)
+    Path(args.output).write_text(html, encoding="utf-8")
+    total = sum(len(f) for _, f in scans)
+    print(f"[+] {args.output}: {len(scans)} tarama, {total} bulgu, {len(diffs)} değişiklik bölümü")
+    return 0
+
+
 def cmd_show(args: argparse.Namespace) -> int:
     with Storage(args.db) as db:
         if args.scan_id is None:
@@ -552,6 +674,29 @@ def build_parser() -> argparse.ArgumentParser:
     vl.add_argument("--refresh", action="store_true", help="NVD önbelleğini yok say, yeniden indir")
     vl.add_argument("-v", "--verbose", action="store_true", help="Tüm CVE'leri ve açıklamaları göster")
     vl.set_defaults(func=cmd_vuln)
+
+    df = sub.add_parser("diff", help="İki taramayı karşılaştır (varsayılan: son tarama vs öncekisi)")
+    df.add_argument("new", nargs="?", type=int, help="Yeni tarama ID (varsayılan: en son)")
+    df.add_argument("old", nargs="?", type=int, help="Eski tarama ID (varsayılan: otomatik)")
+    df.add_argument("--fail-on", choices=list(SEVERITIES), help="Bu önem ve üstünde yeni bulgu varsa çıkış kodu 1")
+    df.add_argument("-v", "--verbose", action="store_true")
+    df.set_defaults(func=cmd_diff)
+
+    wt = sub.add_parser("watch", help="Ağ taraması yap ve bir öncekiyle karşılaştır (cron/CI için)")
+    wt.add_argument("targets", nargs="+")
+    wt.add_argument("--profile", choices=list(network.PROFILES), default="default")
+    wt.add_argument("-p", "--ports")
+    wt.add_argument("--ipv6", action="store_true")
+    wt.add_argument("--fail-on", choices=list(SEVERITIES), default="medium",
+                    help="Bu önem ve üstünde yeni/kötüleşen bulgu varsa çıkış kodu 1 (varsayılan: medium)")
+    wt.add_argument("-q", "--quiet", action="store_true", help="Sadece değişiklikleri yazdır")
+    wt.set_defaults(func=cmd_watch, ping_mode=None)
+
+    rp = sub.add_parser("report", help="HTML rapor üret")
+    rp.add_argument("-o", "--output", default="surfacewatch-report.html")
+    rp.add_argument("--scans", nargs="+", type=int, metavar="ID", help="Belirli taramalar (varsayılan: her modülün sonuncusu)")
+    rp.add_argument("--include-info", action="store_true", help="Bilgi seviyesindeki bulguları da tabloya koy")
+    rp.set_defaults(func=cmd_report)
 
     shw = sub.add_parser("show", help="Bir taramanın bulgularını göster (varsayılan: son)")
     shw.add_argument("scan_id", nargs="?", type=int)

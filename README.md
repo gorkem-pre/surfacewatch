@@ -11,6 +11,9 @@ SurfaceWatch, kendi sistemlerinin saldırı yüzeyini iki açıdan inceleyen bir
 
 > ⚠️ Araç **yalnızca `scope.yml` içinde tanımlı hedefleri** tarar. Sadece sahibi olduğun ya da yazılı izin aldığın sistemlerde kullan.
 
+![HTML rapor](docs/report.png)
+*Örnek HTML rapor (test verisiyle üretildi).*
+
 ## Durum
 
 | Modül | Durum |
@@ -20,7 +23,7 @@ SurfaceWatch, kendi sistemlerinin saldırı yüzeyini iki açıdan inceleyen bir
 | 3. Pasif OSINT: crt.sh subdomain keşfi, subdomain takeover adayı, SPF/DMARC/CAA, NS/MX | ✅ |
 | 4. Web: güvenlik header'ları, TLS, cookie bayrakları, açık hassas dosyalar | ✅ |
 | 5. Zafiyet: servis sürümü → CVE (NVD API 2.0), KEV işaretleme, yerel sürüm aralığı eşleme | ✅ |
-| 6. Diff motoru + HTML/JSON rapor | ⏳ |
+| 6. Diff motoru (blue), `watch` (cron/CI), HTML rapor | ✅ |
 
 ## Kurulum
 
@@ -185,6 +188,41 @@ Nasıl çalışır:
 
 > **Sınırlama:** Sürüm tabanlı eşleme dağıtım backport'larını göremez. `OpenSSH 6.6.1p1 Ubuntu 2ubuntu2.13` eski sürüm numarası taşısa da birçok yamayı içerebilir. Araç bu durumu algılayıp uyarı ekler; sonuçlar dağıtımın güvenlik bültenleriyle doğrulanmalıdır.
 
+**8. Değişiklik izleme (blue modu)**
+
+```bash
+surfacewatch diff                      # son tarama vs aynı kapsam/modüldeki bir önceki
+surfacewatch diff 7 3                  # iki taramayı elle seç
+surfacewatch watch 192.168.56.0/24 -q  # tara + karşılaştır; sadece değişiklikleri yazdır
+```
+
+```
++ YENİ     HIGH      45.33.32.156       3306/tcp açık: mysql (MySQL 5.5.62)
+~ DEĞİŞTİ  INFO      45.33.32.156       22/tcp açık: ssh (OpenSSH 9.6p1 ...)  (değişti)
+                              version: 6.6.1p1 Ubuntu 2ubuntu2.13 -> 9.6p1 Ubuntu 3ubuntu13.5
+- KAPANDI  LOW       45.33.32.156       9929/tcp açık: nping-echo (Nping echo)
+
+1 yeni, 1 değişen, 1 kapanan, 2 aynı
+```
+
+- Bulgular `(hedef, modül, anahtar)` kimliği ve içerik hash'iyle eşleştirilir.
+- Bu taramada hiç taranmayan hedeflerin bulguları "kapandı" sayılmaz.
+- `--fail-on medium` (watch için varsayılan): bu önem ve üstünde yeni ya da kötüleşen bulgu varsa çıkış kodu `1` döner. Cron veya CI ile alarm üretmek için:
+
+```cron
+# Her gece 03:17'de lab ağını tara; değişiklik varsa log'a yaz
+17 3 * * * cd ~/surfacewatch && .venv/bin/surfacewatch watch 192.168.56.0/24 -q >> watch.log 2>&1 || echo "$(date) DEĞİŞİKLİK" >> alerts.log
+```
+
+**9. HTML rapor**
+
+```bash
+surfacewatch report -o rapor.html            # her modülün son taraması + değişiklikler
+surfacewatch report --scans 2 4 5 -o r.html  # belirli taramalar
+```
+
+Tek dosya, JavaScript yok, CDN yok: e-postayla gönderilebilir, çevrimdışı açılır. Öncelikli bulgular, değişiklikler, modül bazlı tablolar (düzeltme önerileriyle), CVE listeleri (NVD linkli), MITRE ATT&CK eşlemesi ve yöntem/sınırlamalar bölümü içerir. Bulgu içerikleri uzak sistemlerden geldiği için tüm değerler escape edilir ve CSP ile script çalıştırma kapatılır.
+
 **Diğer seçenekler**
 
 ```bash
@@ -220,6 +258,7 @@ surfacewatch/
 ├── core/
 │   ├── scope.py     kapsam yükleme, doğrulama ve karar (Decision + gerekçe)
 │   ├── models.py    Finding: tüm modüllerin ortak bulgu formatı (MITRE + remediation)
+│   ├── diff.py      iki tarama arasında yeni / değişen / kapanan bulgular
 │   └── storage.py   SQLite: scans / findings, diff için son iki tarama
 ├── modules/
 │   ├── network.py   nmap komutu, XML parse, Finding üretimi
@@ -228,6 +267,7 @@ surfacewatch/
 │   ├── web.py       header, TLS, cookie, hassas dosya kontrolleri
 │   ├── vuln.py      CPE -> NVD, sürüm aralığı eşleme, KEV, önbellek
 │   └── dnsclient.py DNS arayüzü (dnspython / testler için FakeDns)
+├── report.py        tek dosyalık HTML rapor
 └── cli.py
 ```
 

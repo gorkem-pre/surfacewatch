@@ -10,3 +10,5 @@ dist/
 scope.yml
 *.db
 reports/
+rapor*.html
+surfacewatch-report*.html

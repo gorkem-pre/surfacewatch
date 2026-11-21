@@ -195,6 +195,7 @@ def _score(metrics: dict) -> tuple[float | None, str, str]:
 
 def summarize(cve: dict) -> CveInfo:
     desc = next((d["value"] for d in cve.get("descriptions", []) if d.get("lang") == "en"), "")
+    desc = " ".join(desc.split())   # NVD açıklamalarındaki satır sonları terminal/rapor düzenini bozar
     score, sev, ver = _score(cve.get("metrics", {}))
     return CveInfo(cve.get("id", ""), score, sev, ver, desc, bool(cve.get("cisaExploitAdd")),
                    cve.get("published", "")[:10])
