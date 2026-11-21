@@ -1,0 +1,574 @@
+{
+ "resultsPerPage": 12,
+ "startIndex": 0,
+ "totalResults": 12,
+ "format": "NVD_CVE",
+ "version": "2.0",
+ "vulnerabilities": [
+  {
+   "cve": {
+    "id": "CVE-2099-0001",
+    "published": "2099-01-01T00:00:00.000",
+    "vulnStatus": "Analyzed",
+    "descriptions": [
+     {
+      "lang": "es",
+      "value": "es"
+     },
+     {
+      "lang": "en",
+      "value": "Sentetik test zafiyeti 1."
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "nvd@nist.gov",
+       "type": "Primary",
+       "cvssData": {
+        "version": "3.1",
+        "baseScore": 7.5,
+        "baseSeverity": "HIGH"
+       }
+      }
+     ]
+    },
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+          "matchCriteriaId": "M1",
+          "versionEndExcluding": "7.4"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2099-0002",
+    "published": "2099-01-01T00:00:00.000",
+    "vulnStatus": "Analyzed",
+    "descriptions": [
+     {
+      "lang": "es",
+      "value": "es"
+     },
+     {
+      "lang": "en",
+      "value": "Sentetik test zafiyeti 2."
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "nvd@nist.gov",
+       "type": "Primary",
+       "cvssData": {
+        "version": "3.1",
+        "baseScore": 8.1,
+        "baseSeverity": "HIGH"
+       }
+      }
+     ]
+    },
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+          "matchCriteriaId": "M2",
+          "versionStartIncluding": "8.5p1",
+          "versionEndExcluding": "9.8p1"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2099-0003",
+    "published": "2099-01-01T00:00:00.000",
+    "vulnStatus": "Analyzed",
+    "descriptions": [
+     {
+      "lang": "es",
+      "value": "es"
+     },
+     {
+      "lang": "en",
+      "value": "Sentetik test zafiyeti 3."
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "nvd@nist.gov",
+       "type": "Primary",
+       "cvssData": {
+        "version": "3.1",
+        "baseScore": 5.3,
+        "baseSeverity": "MEDIUM"
+       }
+      }
+     ]
+    },
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:openbsd:openssh:6.6:p1:*:*:*:*:*:*",
+          "matchCriteriaId": "M3"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2099-0004",
+    "published": "2099-01-01T00:00:00.000",
+    "vulnStatus": "Analyzed",
+    "descriptions": [
+     {
+      "lang": "es",
+      "value": "es"
+     },
+     {
+      "lang": "en",
+      "value": "Sentetik test zafiyeti 4."
+     }
+    ],
+    "metrics": {
+     "cvssMetricV2": [
+      {
+       "source": "nvd@nist.gov",
+       "type": "Primary",
+       "cvssData": {
+        "version": "2.0",
+        "baseScore": 5.0
+       },
+       "baseSeverity": "MEDIUM"
+      }
+     ]
+    },
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:openbsd:openssh:6.6.1:p1:*:*:*:*:*:*",
+          "matchCriteriaId": "M4"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2099-0005",
+    "published": "2099-01-01T00:00:00.000",
+    "vulnStatus": "Analyzed",
+    "descriptions": [
+     {
+      "lang": "es",
+      "value": "es"
+     },
+     {
+      "lang": "en",
+      "value": "Sentetik test zafiyeti 5."
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "nvd@nist.gov",
+       "type": "Primary",
+       "cvssData": {
+        "version": "3.1",
+        "baseScore": 9.8,
+        "baseSeverity": "CRITICAL"
+       }
+      }
+     ]
+    },
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": false,
+          "criteria": "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+          "matchCriteriaId": "M5",
+          "versionEndIncluding": "6.6.1"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2099-0006",
+    "published": "2099-01-01T00:00:00.000",
+    "vulnStatus": "Analyzed",
+    "descriptions": [
+     {
+      "lang": "es",
+      "value": "es"
+     },
+     {
+      "lang": "en",
+      "value": "Sentetik test zafiyeti 6."
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "nvd@nist.gov",
+       "type": "Primary",
+       "cvssData": {
+        "version": "3.1",
+        "baseScore": 9.8,
+        "baseSeverity": "CRITICAL"
+       }
+      }
+     ]
+    },
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:o:openbsd:openbsd:*:*:*:*:*:*:*:*",
+          "matchCriteriaId": "M6"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2099-0007",
+    "published": "2099-01-01T00:00:00.000",
+    "vulnStatus": "Analyzed",
+    "descriptions": [
+     {
+      "lang": "es",
+      "value": "es"
+     },
+     {
+      "lang": "en",
+      "value": "Sentetik test zafiyeti 7."
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "nvd@nist.gov",
+       "type": "Primary",
+       "cvssData": {
+        "version": "3.1",
+        "baseScore": 6.4,
+        "baseSeverity": "MEDIUM"
+       }
+      }
+     ]
+    },
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+          "matchCriteriaId": "M7",
+          "versionEndIncluding": "6.6.1"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2099-0008",
+    "published": "2099-01-01T00:00:00.000",
+    "vulnStatus": "Analyzed",
+    "descriptions": [
+     {
+      "lang": "es",
+      "value": "es"
+     },
+     {
+      "lang": "en",
+      "value": "Sentetik test zafiyeti 8."
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "nvd@nist.gov",
+       "type": "Primary",
+       "cvssData": {
+        "version": "3.1",
+        "baseScore": 9.8,
+        "baseSeverity": "CRITICAL"
+       }
+      }
+     ]
+    },
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+          "matchCriteriaId": "M8",
+          "versionStartIncluding": "5.0",
+          "versionEndExcluding": "7.0"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "cisaExploitAdd": "2099-02-01"
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2099-0009",
+    "published": "2099-01-01T00:00:00.000",
+    "vulnStatus": "Rejected",
+    "descriptions": [
+     {
+      "lang": "es",
+      "value": "es"
+     },
+     {
+      "lang": "en",
+      "value": "Sentetik test zafiyeti 9."
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "nvd@nist.gov",
+       "type": "Primary",
+       "cvssData": {
+        "version": "3.1",
+        "baseScore": 9.0,
+        "baseSeverity": "CRITICAL"
+       }
+      }
+     ]
+    },
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+          "matchCriteriaId": "M9",
+          "versionEndExcluding": "9.9"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2099-0010",
+    "published": "2099-01-01T00:00:00.000",
+    "vulnStatus": "Analyzed",
+    "descriptions": [
+     {
+      "lang": "es",
+      "value": "es"
+     },
+     {
+      "lang": "en",
+      "value": "Sentetik test zafiyeti 10."
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "nvd@nist.gov",
+       "type": "Primary",
+       "cvssData": {
+        "version": "3.1",
+        "baseScore": 9.0,
+        "baseSeverity": "CRITICAL"
+       }
+      }
+     ]
+    },
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": true,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+          "matchCriteriaId": "M10",
+          "versionEndExcluding": "9.9"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2099-0011",
+    "published": "2099-01-01T00:00:00.000",
+    "vulnStatus": "Analyzed",
+    "descriptions": [
+     {
+      "lang": "es",
+      "value": "es"
+     },
+     {
+      "lang": "en",
+      "value": "Sentetik test zafiyeti 11."
+     }
+    ],
+    "metrics": {
+     "cvssMetricV40": [
+      {
+       "source": "x",
+       "type": "Secondary",
+       "cvssData": {
+        "version": "4.0",
+        "baseScore": 5.9,
+        "baseSeverity": "MEDIUM"
+       }
+      }
+     ]
+    },
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+          "matchCriteriaId": "M11",
+          "versionStartExcluding": "6.6.1",
+          "versionEndExcluding": "7.0"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2099-0012",
+    "published": "2099-01-01T00:00:00.000",
+    "vulnStatus": "Analyzed",
+    "descriptions": [
+     {
+      "lang": "es",
+      "value": "es"
+     },
+     {
+      "lang": "en",
+      "value": "Sentetik test zafiyeti 12."
+     }
+    ],
+    "metrics": {},
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+          "matchCriteriaId": "M12",
+          "versionEndExcluding": "6.7"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

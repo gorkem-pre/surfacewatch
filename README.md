@@ -19,7 +19,7 @@ SurfaceWatch, kendi sistemlerinin saldırı yüzeyini iki açıdan inceleyen bir
 | 2. Ağ: Nmap entegrasyonu, servis/sürüm tespiti, MITRE + düzeltme bilgi tabanı | ✅ |
 | 3. Pasif OSINT: crt.sh subdomain keşfi, subdomain takeover adayı, SPF/DMARC/CAA, NS/MX | ✅ |
 | 4. Web: güvenlik header'ları, TLS, cookie bayrakları, açık hassas dosyalar | ✅ |
-| 5. Zafiyet: sürüm → CVE (NVD) | ⏳ |
+| 5. Zafiyet: servis sürümü → CVE (NVD API 2.0), KEV işaretleme, yerel sürüm aralığı eşleme | ✅ |
 | 6. Diff motoru + HTML/JSON rapor | ⏳ |
 
 ## Kurulum
@@ -168,6 +168,23 @@ LOW       Clickjacking koruması yok (X-Frame-Options / frame-ancestors)
 
 Hedef başına yaklaşık 10 istek gönderilir ve istekler arasında bekleme vardır. Hassas dosyalarda sadece HTTP 200'e bakılmaz, içerik de doğrulanır (ör. `.git/HEAD` gerçekten `ref: refs/...` ile mi başlıyor). Böylece her yola 200 dönen sunucularda yanlış alarm verilmez.
 
+**7. Bilinen zafiyetler (CVE)**
+
+```bash
+export NVD_API_KEY=...          # opsiyonel, ücretsiz: https://nvd.nist.gov/developers/request-an-api-key
+surfacewatch vuln               # son ağ taramasındaki servis sürümleri -> NVD
+surfacewatch vuln -v            # tüm CVE'ler ve açıklamaları
+surfacewatch vuln --refresh     # NVD önbelleğini yenile (varsayılan 24 saat)
+```
+
+Nasıl çalışır:
+1. Nmap'in verdiği CPE'den üretici, ürün ve sürüm çıkarılır (`cpe:/a:openbsd:openssh:6.6.1p1`).
+2. NVD'den ürünün **tüm** CVE'leri çekilir ve `~/.cache/surfacewatch/nvd/` altında önbelleklenir. Anahtarsız kullanımda NVD sınırına (30 sn'de 5 istek) uyulur.
+3. Her CVE'nin CPE eşleme kriterleri (`versionStartIncluding`, `versionEndExcluding` vb.) **yerelde** değerlendirilir. Hangi kuralın neden eşleştiği şeffaf ve test edilebilir.
+4. CISA KEV listesindeki (aktif istismar edilen) CVE'ler öne alınır ve bulgunun önemi bir kademe yükseltilir.
+
+> **Sınırlama:** Sürüm tabanlı eşleme dağıtım backport'larını göremez. `OpenSSH 6.6.1p1 Ubuntu 2ubuntu2.13` eski sürüm numarası taşısa da birçok yamayı içerebilir. Araç bu durumu algılayıp uyarı ekler; sonuçlar dağıtımın güvenlik bültenleriyle doğrulanmalıdır.
+
 **Diğer seçenekler**
 
 ```bash
@@ -209,6 +226,7 @@ surfacewatch/
 │   ├── knowledge.py servis → önem, MITRE, düzeltme bilgi tabanı
 │   ├── osint.py     crt.sh, subdomain analizi, SPF/DMARC/CAA
 │   ├── web.py       header, TLS, cookie, hassas dosya kontrolleri
+│   ├── vuln.py      CPE -> NVD, sürüm aralığı eşleme, KEV, önbellek
 │   └── dnsclient.py DNS arayüzü (dnspython / testler için FakeDns)
 └── cli.py
 ```

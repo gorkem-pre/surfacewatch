@@ -8,6 +8,7 @@
     surfacewatch scan <hedef>...          ağ taraması (red)
     surfacewatch osint <domain>...        pasif OSINT: subdomain, SPF/DMARC, DNS
     surfacewatch web <url>... | --from-scan   web yapılandırma kontrolleri
+    surfacewatch vuln [--from-scan ID]    servis sürümleri -> bilinen CVE'ler (NVD)
     surfacewatch show [scan_id]           tarama bulgularını göster
 
 watch (blue / diff) komutu Modül 6'da eklenecek.
@@ -21,7 +22,7 @@ from pathlib import Path
 
 from . import __version__
 from .core import SEVERITIES, Finding, Scope, ScopeError, Storage, TargetType, classify
-from .modules import network, osint, web
+from .modules import network, osint, vuln, web
 from .modules.dnsclient import DnsClient, DnsError, DnspythonClient
 
 SCOPE_TEMPLATE = """\
@@ -173,6 +174,27 @@ def _print_web(findings: list[Finding], verbose: bool, color: bool) -> None:
         print()
 
 
+def _print_vuln(findings: list[Finding], verbose: bool, color: bool) -> None:
+    order = {s: i for i, s in enumerate(SEVERITIES)}
+    for f in sorted(findings, key=lambda f: (-order[f.severity], f.target, f.key)):
+        print(f"{_sev(f.severity, color)}  {f.target:<16} {f.data.get('port', ''):<9} {f.title}")
+        cves = f.data.get("cves", [])
+        limit = len(cves) if verbose else 5
+        for c in cves[:limit]:
+            kev = " KEV" if c.get("kev") else ""
+            score = f"{c['score']:.1f}" if c.get("score") is not None else " ?  "
+            desc = c.get("description", "")
+            desc = (desc[:90] + "...") if len(desc) > 93 and not verbose else desc
+            print(f"          {c['id']:<16} {score:>4}{kev:<4} {desc}")
+        if len(cves) > limit:
+            print(f"          ... +{len(cves) - limit} CVE daha (tamamı için -v)")
+        if f.data.get("note") and (verbose or f.data.get("distro_build")):
+            print(f"          not    : {f.data['note']}")
+        if verbose and f.remediation:
+            print(f"          MITRE  : {', '.join(f.mitre)}")
+            print(f"          düzelt : {f.remediation}")
+
+
 def _print_details(f: Finding, verbose: bool, show_title: bool = False) -> None:
     if show_title:
         print(f"          {f.title}")
@@ -191,7 +213,8 @@ def print_findings(findings: list[Finding], verbose: bool = False) -> None:
     if not findings:
         print("Bulgu yok.")
         return
-    printers = [(network.MODULE, _print_network), (osint.MODULE, _print_osint), (web.MODULE, _print_web)]
+    printers = [(network.MODULE, _print_network), (osint.MODULE, _print_osint), (web.MODULE, _print_web),
+                (vuln.MODULE, _print_vuln)]
     first = True
     for module, printer in printers:
         part = [f for f in findings if f.module == module]
@@ -403,6 +426,54 @@ def cmd_web(args: argparse.Namespace) -> int:
     return 0 if ok else 2
 
 
+def make_nvd() -> vuln.NvdClient:
+    return vuln.NvdClient()
+
+
+def _latest_network_scan(db: Storage, scan_id: int | None) -> int:
+    if scan_id is not None and scan_id >= 0:
+        if db.get_scan(scan_id) is None:
+            raise ScopeError(f"Tarama #{scan_id} bulunamadı")
+        return scan_id
+    scans = [s for s in db.list_scans(limit=50) if network.MODULE in s.modules and s.status == "done"]
+    if not scans:
+        raise ScopeError("Ağ taraması bulunamadı; önce: surfacewatch scan <hedef>")
+    return scans[0].id
+
+
+def cmd_vuln(args: argparse.Namespace) -> int:
+    scope = _load_scope(args)
+    client = make_nvd()
+    with Storage(args.db) as db:
+        source = _latest_network_scan(db, args.from_scan)
+        services = [(f.target, f.key, f.data) for f in db.findings(source) if f.module == network.MODULE]
+        if not services:
+            print(f"[!] Tarama #{source} içinde açık servis yok.", file=sys.stderr)
+            return 2
+        print(f"[i] Kaynak: ağ taraması #{source}, {len(services)} servis", file=sys.stderr)
+        if not client.api_key:
+            print("[i] NVD_API_KEY yok: istekler arası ~6 sn beklenir (ücretsiz anahtar: "
+                  "https://nvd.nist.gov/developers/request-an-api-key)", file=sys.stderr)
+
+        res = vuln.run(services, client, refresh=args.refresh,
+                       progress=lambda m: print(f"[*] {m}", file=sys.stderr))
+        for msg in res.skipped:
+            print(f"[-] Atlandı: {msg}", file=sys.stderr)
+        for msg in res.errors:
+            print(f"[!] {msg}", file=sys.stderr)
+        if res.cache_hits:
+            print(f"[i] {res.cache_hits} ürün önbellekten geldi (--refresh ile yenile)", file=sys.stderr)
+
+        status = "failed" if res.errors and not res.findings else "done"
+        scan_id = db.start_scan(scope.name, [vuln.MODULE], sorted({t for t, _, _ in services}))
+        db.add_findings(scan_id, res.findings)
+        db.finish_scan(scan_id, status)
+
+    print(f"\nTarama #{scan_id} ({status})\n")
+    print_findings(res.findings, verbose=args.verbose)
+    return 0 if status == "done" else 2
+
+
 def cmd_show(args: argparse.Namespace) -> int:
     with Storage(args.db) as db:
         if args.scan_id is None:
@@ -474,6 +545,13 @@ def build_parser() -> argparse.ArgumentParser:
     wb.add_argument("--ipv6", action="store_true")
     wb.add_argument("-v", "--verbose", action="store_true")
     wb.set_defaults(func=cmd_web)
+
+    vl = sub.add_parser("vuln", help="Ağ taramasındaki servis sürümlerini NVD CVE'leriyle eşle")
+    vl.add_argument("--from-scan", type=int, metavar="SCAN_ID",
+                    help="Kaynak ağ taraması (varsayılan: son ağ taraması)")
+    vl.add_argument("--refresh", action="store_true", help="NVD önbelleğini yok say, yeniden indir")
+    vl.add_argument("-v", "--verbose", action="store_true", help="Tüm CVE'leri ve açıklamaları göster")
+    vl.set_defaults(func=cmd_vuln)
 
     shw = sub.add_parser("show", help="Bir taramanın bulgularını göster (varsayılan: son)")
     shw.add_argument("scan_id", nargs="?", type=int)
