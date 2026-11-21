@@ -33,38 +33,94 @@ pip install -e ".[dev]"
 
 ## Kullanım
 
+Aşağıdaki örnekler [scanme.nmap.org](http://scanme.nmap.org/) üzerinde yapılmıştır. Nmap ekibi bu sunucuyu hafif taramalar için herkese açmıştır.
+
+**1. Kapsamı tanımla**
+
 ```bash
-surfacewatch init                                  # scope.yml şablonu
-surfacewatch scope show
-surfacewatch scope check 192.168.56.10 8.8.8.8 cdn.lab.local
+surfacewatch init          # scope.yml şablonu oluşturur
+```
 
-surfacewatch scan scanme.nmap.org -v              # kapsam kontrolü → nmap → bulgular
-surfacewatch scan 192.168.56.0/28 --profile quick
-surfacewatch scan 192.168.56.10 -p 22,80,443
-surfacewatch show                                 # son taramanın bulguları
-surfacewatch scans                                # tarama geçmişi
+```yaml
+# scope.yml
+name: home-lab
+targets:
+  hosts:
+    - 45.33.32.156                    # scanme.nmap.org IPv4
+    - 2600:3c01::f03c:91ff:fe18:bb2f  # scanme.nmap.org IPv6
+  domains:
+    - name: scanme.nmap.org
+      include_subdomains: false
+options:
+  max_rate: 100
+```
+
+**2. Kapsamı doğrula**
+
+```bash
+surfacewatch scope check scanme.nmap.org 45.33.32.156 8.8.8.8
 ```
 
 ```
+İZİN  scanme.nmap.org      domain ve çözümlenen IP'ler kapsamda  [2600:3c01::f03c:91ff:fe18:bb2f, 45.33.32.156]
+İZİN  45.33.32.156         IP kapsamda
+RED   8.8.8.8              IP hiçbir kapsam ağında değil
+```
+
+**3. Tara**
+
+```bash
+surfacewatch scan scanme.nmap.org -v
+```
+
+```
+[i] IPv6 atlandı 2600:3c01::f03c:91ff:fe18:bb2f (dahil etmek için --ipv6)
+[*] Taranıyor: scanme.nmap.org (45.33.32.156)  profil=default  max_rate=100
+    $ nmap -sT -sV --version-light -T3 --max-rate 100 -n -oX - -Pn --top-ports 1000 45.33.32.156
+    45.33.32.156: up, 3 açık, 997 filtreli, 0 kapalı, RTT 194.9 ms
+
 ÖNEM      HEDEF              PORT       SERVİS         SÜRÜM
+LOW       45.33.32.156       tcp/9929   nping-echo     Nping echo
+          MITRE  : T1046
+          düzelt : Bu servis gerçekten gerekli mi? Gerekli değilse kapat; ...
 INFO      45.33.32.156       tcp/22     ssh            OpenSSH 6.6.1p1 Ubuntu 2ubuntu2.13
           risk   : Uzaktan yönetim kapısı; brute force'un ilk hedefi.
           MITRE  : T1021.004, T1046, T1110
           düzelt : Parola ile girişi kapat (PasswordAuthentication no), sadece anahtar kullan; ...
+INFO      45.33.32.156       tcp/80     http           Apache httpd 2.4.7
+          MITRE  : T1046, T1190, T1595.002
+          düzelt : HTTPS'e yönlendir (301 + HSTS); sürüm bilgisini gizle ...
+
+3 bulgu  low: 1  info: 2
 ```
 
+**4. Geçmiş**
+
+```bash
+surfacewatch show          # son taramanın bulguları
+surfacewatch show 1 -v     # belirli bir tarama
+surfacewatch scans         # tarama geçmişi
 ```
-İZİN  192.168.56.10                       IP kapsamda
-RED   8.8.8.8                             IP hiçbir kapsam ağında değil
-RED   cdn.lab.local                       domain kapsamda ama çözümlenen IP kapsam dışı: 104.16.1.1 (üçüncü taraf sunucu olabilir)
+
+**Diğer seçenekler**
+
+```bash
+surfacewatch scan 192.168.56.0/28 --profile quick     # kendi lab ağın (top 100 port)
+surfacewatch scan 192.168.56.10 -p 22,80,443          # belirli portlar
+surfacewatch scan scanme.nmap.org --ipv6              # IPv6 adreslerini de tara
 ```
+
+> `scanme.nmap.org` üzerinde `--profile full` kullanma; tüm 65.535 portu tarar ve paylaşılan bir sunucuyu yorar.
 
 ## Kapsam güvenliği
 
 Kapsam kontrolü aracın en kritik parçasıdır ve tüm aktif modüller ondan geçer:
 
 1. **`exclude` her şeyi ezer.** Hariç tutulan bir IP'yi kapsayan ağ taraması da reddedilir.
-2. **Domain sahipliği, IP sahipliği demek değildir.** `cdn.ornek.com` senin domain'in olabilir ama Cloudflare'e çözülüyorsa o sunucuyu taramak Cloudflare'i taramaktır. Aktif taramada çözümlenen tüm IP'ler de kapsamda olmalı; tek bir IP bile dışarıdaysa hedef reddedilir.
+2. **Domain sahipliği, IP sahipliği demek değildir.** `cdn.ornek.com` senin domain'in olabilir ama Cloudflare'e çözülüyorsa o sunucuyu taramak Cloudflare'i taramaktır. Aktif taramada çözümlenen tüm IP'ler de kapsamda olmalı; tek bir IP bile dışarıdaysa hedef reddedilir:
+   ```
+   RED   cdn.ornek.com   domain kapsamda ama çözümlenen IP kapsam dışı: 104.16.1.1 (üçüncü taraf sunucu olabilir)
+   ```
 3. **Sonek hilelerine karşı:** `evil-lab.local` ve `lab.local.evil.com`, `lab.local` kapsamına girmez.
 4. **Aşırı geniş kapsam reddedilir:** /16'dan büyük ağlar kabul edilmez.
 5. **Pasif / aktif ayrımı:** CT log ve DNS sorgusu gibi hedefe paket göndermeyen işlemler sadece domain kuralına bakar.
@@ -95,6 +151,10 @@ Her `Finding` için `(target, module, key)` kimliği ve `data` hash'i (fingerpri
 pytest -q
 ruff check .
 ```
+
+## Geliştirme notu
+
+Bu proje AI asistanı (Claude) desteğiyle geliştirildi; tasarım kararları, test ve doğrulama tarafımdan yapıldı.
 
 ## Lisans
 
